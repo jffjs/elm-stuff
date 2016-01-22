@@ -1,50 +1,66 @@
 module Spaceships where
 
 
-import Graphics.Element exposing (show)
-import Random exposing (generate, int, initialSeed)
-import Signal exposing (Signal, filter, foldp, sampleOn)
+import Graphics.Collage exposing (collage)
+import Graphics.Element exposing (Element)
+import Signal
 import Signal.Extra exposing ((<~), (~))
-import Signal.Time exposing (startTime)
-import Time exposing (Time, fps, timestamp)
-import Debug
+import Time exposing (Time)
+import Window
 
-width : Int
-width = 600
-height : Int
-height = 800
-type alias Star = { x: Int, y: Int, size: Int }
+import Stars exposing (Star, makeStarField, renderStars, updateStarField)
+import Player exposing (Player, makePlayer, renderPlayer)
 
-star : Int -> Int -> Int -> Star
-star x y size = { x = x, y = y, size = size }
+type alias Position = (Int, Int)
+type Input = Tick Time
+type GameState = NewGame | Started | GameOver
+type alias Game =
+  { state: GameState
+  , stars: List Star
+  , player: Maybe Player
+  }
 
-randomStar : Int -> Star
-randomStar seed =
-  let seed1 = initialSeed <| seed
-      (x, seed2) = generate (int 0 width) seed1
-      (y, seed3) = generate (int 0 height) seed2
-      (size, _) = generate (int 1 4) seed3
+initialGame : Game
+initialGame = { state = NewGame, stars = [], player = Nothing }
+
+
+step : (Input, (Int, Int)) -> Game -> Game
+step (input, (w, h)) game =
+  case (game.state, input) of
+    (NewGame, Tick t) ->
+      {game
+        | state = Started
+        , player = Just <| makePlayer w (toFloat h - 80) 1
+        , stars = makeStarField w h 500 (round t)}
+    (Started, Tick t) ->
+      {game | state = Started, stars = updateStarField h t game.stars}
+    (GameOver, _) ->
+      game
+
+
+delta : Signal Time
+delta = Time.fps 60
+timer : Signal Input
+timer = Signal.sampleOn delta <| (\n -> Tick <| n / 10) <~ delta
+
+
+render : (Int, Int) -> Game -> Element
+render (w', h') game =
+  let
+    (w, h) = (toFloat w', toFloat h')
   in
-    star x y size
+    collage w' h'
+              <| renderPlayer (w, h) game.player
+                   :: renderStars (w, h) game.stars
 
-starField : Int -> Time -> List Star
-starField density time =
-  let starField' remaining stars =
-        if remaining <= 0
-        then stars
-        else starField' (remaining - 1)
-             <| randomStar (round time - remaining) :: stars
-  in
-    starField' density []
 
-clockSignal : Signal Time
-clockSignal = fps 50
+inputSignal : Signal Input
+inputSignal = timer
 
--- updateStarField : Time -> List Star
--- updateStarField tick = [star 1 2 3]
 
--- starFieldSignal : Signal List Star
--- starFieldSignal =
---   foldp updateStarField (starField 250) clockSignal
+gameSignal : Signal Game
+gameSignal = Signal.foldp step initialGame <| (,) <~ inputSignal ~ Window.dimensions
 
-main = show "Hello"
+
+main : Signal Element
+main = Signal.map2 render Window.dimensions gameSignal
